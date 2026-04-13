@@ -26,9 +26,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifndef __TinyGPSPlus_h
 #define __TinyGPSPlus_h
 
+#include <math.h>
 #include <inttypes.h>
-#include "Arduino.h"
 #include <limits.h>
+#include "esp_timer.h"
+
 
 #define _GPS_VERSION "1.1.0" // software version of this library
 #define _GPS_MPH_PER_KNOT 1.15077945
@@ -39,6 +41,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define _GPS_FEET_PER_METER 3.2808399
 #define _GPS_MAX_FIELD_SIZE 15
 #define _GPS_EARTH_MEAN_RADIUS 6371009 // old: 6372795
+#define _MAX_NUM_SATELLITES_EACH_SYSTEM 40
+
+static int64_t millis() {
+  return esp_timer_get_time() / 1000;
+}
 
 struct RawDegrees
 {
@@ -223,6 +230,50 @@ private:
    TinyGPSCustom *next;
 };
 
+/*
+for recording information from
+$GPGSV → GPS satellites
+$BDGSV → beidou satellites
+$GAGSV → Galileo satellites
+$GQGSV → QZSS satellites
+*/
+struct SatellitesStates {
+  uint32_t num_lines;
+  uint32_t current_line;
+  uint32_t num_satellites;
+
+  // PRN number, elevation angle, azimuth angle, C/N
+  uint16_t informations[_MAX_NUM_SATELLITES_EACH_SYSTEM][4];
+
+  void set(const char *term, uint8_t term_num);
+  void PrintAllCNValues() {
+    for (uint32_t i = 0; i < num_satellites; i++) {
+      printf("%d ", informations[i][3]);
+    }
+  }
+};
+
+struct TinyGPSSatellites {
+  SatellitesStates satellites_gps;
+  SatellitesStates satellites_beidou;
+  SatellitesStates satellites_galileo;
+  SatellitesStates satellites_gzss;
+
+  void PrintAllCNValues() {
+    printf("  GPS ");
+    satellites_gps.PrintAllCNValues();
+    printf("\n  BeiDou ");
+    satellites_beidou.PrintAllCNValues();
+    printf("\n  Galileo ");
+    satellites_galileo.PrintAllCNValues();
+    printf("\n  GZSS ");
+    satellites_gzss.PrintAllCNValues();
+    printf("\n");
+  }
+
+  void set(const char *term, char label, uint8_t term_num);
+};
+
 class TinyGPSPlus
 {
 public:
@@ -239,6 +290,9 @@ public:
   TinyGPSInteger satellites;
   TinyGPSHDOP hdop;
 
+  // information for each satellite
+  TinyGPSSatellites satellites_details;
+
   static const char *libraryVersion() { return _GPS_VERSION; }
 
   static double distanceBetween(double lat1, double long1, double lat2, double long2);
@@ -254,7 +308,7 @@ public:
   uint32_t passedChecksum()   const { return passedChecksumCount; }
 
 private:
-  enum {GPS_SENTENCE_GGA, GPS_SENTENCE_RMC, GPS_SENTENCE_OTHER};
+  enum {GPS_SENTENCE_GGA, GPS_SENTENCE_RMC, GPS_SENTENCE_GSV, GPS_SENTENCE_OTHER};
 
   // parsing state variables
   uint8_t parity;
@@ -264,6 +318,7 @@ private:
   uint8_t curTermNumber;
   uint8_t curTermOffset;
   bool sentenceHasFix;
+  char gsv_type;
 
   // custom element support
   friend class TinyGPSCustom;

@@ -29,19 +29,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #define _RMCterm "RMC"
 #define _GGAterm "GGA"
+#define _GSVterm "GSV"
 
-#if !defined(ARDUINO) && !defined(__AVR__)
-// Alternate implementation of millis() that relies on std
-unsigned long millis()
-{
-    static auto start_time = std::chrono::high_resolution_clock::now();
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-
-    return static_cast<unsigned long>(duration.count());
-}
-#endif
+#define radians(x) ((x) * M_PI / 180.0)
+#define degrees(x) ((x) * 180.0 / M_PI)
 
 TinyGPSPlus::TinyGPSPlus()
   :  parity(0)
@@ -172,7 +163,7 @@ bool TinyGPSPlus::endOfTermHandler()
   // If it's the checksum term, and the checksum checks out, commit
   if (isChecksumTerm)
   {
-    byte checksum = 16 * fromHex(term[0]) + fromHex(term[1]);
+    uint8_t checksum = 16 * fromHex(term[0]) + fromHex(term[1]);
     if (checksum == parity)
     {
       passedChecksumCount++;
@@ -224,8 +215,12 @@ bool TinyGPSPlus::endOfTermHandler()
       curSentenceType = GPS_SENTENCE_RMC;
     else if (term[0] == 'G' && strchr("PNABL", term[1]) != NULL && !strcmp(term + 2, _GGAterm))
       curSentenceType = GPS_SENTENCE_GGA;
-    else
+    else if (!strcmp(term + 2, _GSVterm)) {
+      curSentenceType = GPS_SENTENCE_GSV;
+      gsv_type = term[1];
+    } else {
       curSentenceType = GPS_SENTENCE_OTHER;
+    }
 
     // Any custom candidates of this sentence type?
     for (customCandidates = customElts; customCandidates != NULL && strcmp(customCandidates->sentenceName, term) < 0; customCandidates = customCandidates->next);
@@ -235,7 +230,11 @@ bool TinyGPSPlus::endOfTermHandler()
     return false;
   }
 
-  if (curSentenceType != GPS_SENTENCE_OTHER && term[0])
+  if (curSentenceType == GPS_SENTENCE_GSV) {
+    satellites_details.set(term, gsv_type, curTermNumber);
+  }
+
+  if (curSentenceType != GPS_SENTENCE_OTHER && curSentenceType != GPS_SENTENCE_GSV && term[0])
     switch(COMBINE(curSentenceType, curTermNumber))
   {
     case COMBINE(GPS_SENTENCE_RMC, 1): // Time in both sentences
@@ -314,8 +313,9 @@ double TinyGPSPlus::distanceBetween(double lat1, double long1, double lat2, doub
   double slat2 = sin(lat2);
   double clat2 = cos(lat2);
   delta = (clat1 * slat2) - (slat1 * clat2 * cdlong);
-  delta = sq(delta);
-  delta += sq(clat2 * sdlong);
+  delta = delta * delta;
+  double tmp = clat2 * sdlong;
+  delta += tmp * tmp;
   delta = sqrt(delta);
   double denom = (slat1 * slat2) + (clat1 * clat2 * cdlong);
   delta = atan2(delta, denom);
@@ -337,7 +337,7 @@ double TinyGPSPlus::courseTo(double lat1, double long1, double lat2, double long
   a2 = atan2(a1, a2);
   if (a2 < 0.0)
   {
-    a2 += TWO_PI;
+    a2 += 2.0 * M_PI;
   }
   return degrees(a2);
 }
@@ -517,4 +517,50 @@ void TinyGPSPlus::insertCustom(TinyGPSCustom *pElt, const char *sentenceName, in
 
    pElt->next = *ppelt;
    *ppelt = pElt;
+}
+
+void TinyGPSSatellites::set(const char *term, char label, uint8_t term_num) {
+  switch(label) {
+    case 'P' : {
+      // GPS satellites
+      satellites_gps.set(term, term_num);
+    } break;
+    case 'D' : {
+      // beidou satellites
+      satellites_beidou.set(term, term_num);
+    } break;
+    case 'A' : {
+      // Galileo satellites
+      satellites_galileo.set(term, term_num);
+    } break;
+    case 'Q' : {
+      // QZSS satellites
+      satellites_gzss.set(term, term_num);
+    } break;
+  }
+}
+
+void SatellitesStates::set(const char *term, uint8_t term_num) {
+  switch(term_num) {
+    case 1 : {
+      num_lines = atol(term);
+    } break;
+    case 2 : {
+      current_line = atol(term);
+    } break;
+    case 3 : {
+      num_satellites = atol(term);
+    } break;
+  }
+  if (term_num <= 3) return;
+  // satellites informations
+  uint8_t satellite_id = (term_num - 4) / 4;
+  uint8_t value_id = term_num - 4 - satellite_id * 4;
+
+  satellite_id += (current_line - 1) * 4;
+  if (term[0]) {
+    informations[satellite_id][value_id] = atol(term);
+  } else {
+    informations[satellite_id][value_id] = 255;
+  }
 }
