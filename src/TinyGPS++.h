@@ -74,7 +74,7 @@ public:
    Quality FixQuality()           { updated = false; return fixQuality; }
    Mode FixMode()                 { updated = false; return fixMode; }
 
-   TinyGPSLocation() : valid(false), updated(false), fixQuality(Invalid), fixMode(N)
+   TinyGPSLocation() : valid(false), updated(false), fixQuality(Invalid), newFixQuality(Invalid), fixMode(N), newFixMode(N)
    {}
 
 private:
